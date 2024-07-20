@@ -1,0 +1,152 @@
+#include <Wire.h>
+#include <ACS712.h>
+#include <MovingAverageFilter.h>
+#include <ArduinoJson.h>
+#include <EEPROM.h>
+
+const int MAX_CABLES = 10;
+const int EEPROM_CONFIG_ADDR = 0;
+
+struct Config {
+  int numCables;
+  float currentThreshold;
+  float voltageThreshold;
+} config;
+
+struct SensorPins {
+  int currentPin;
+  int voltagePin;
+};
+
+SensorPins sensorPins[MAX_CABLES];
+ACS712* currentSensors[MAX_CABLES];
+MovingAverageFilter* currentFilters[MAX_CABLES];
+MovingAverageFilter* voltageFilters[MAX_CABLES];
+
+void setup() {
+  Serial.begin(115200);
+  loadConfig();
+  initializeSensors();
+}
+
+void loop() {
+  if (Serial.available()) {
+    processSerialCommand();
+  }
+
+  StaticJsonDocument<1024> doc;
+  JsonArray cableArray = doc.createNestedArray("cables");
+
+  for (int i = 0; i < config.numCables; i++) {
+    JsonObject cableObj = cableArray.createNestedObject();
+    if (readCableData(i, cableObj)) {
+      // Datos leídos correctamente
+    } else {
+      cableObj["error"] = "Sensor reading failed";
+    }
+  }
+
+  serializeJson(doc, Serial);
+  Serial.println();
+  
+  delay(1000);
+}
+
+void loadConfig() {
+  EEPROM.get(EEPROM_CONFIG_ADDR, config);
+  if (config.numCables == 0 || config.numCables > MAX_CABLES) {
+    // Configuración por defecto si no hay datos válidos en EEPROM
+    config.numCables = 5;
+    config.currentThreshold = 0.1;
+    config.voltageThreshold = 5.0;
+    EEPROM.put(EEPROM_CONFIG_ADDR, config);
+  }
+}
+
+void initializeSensors() {
+  for (int i = 0; i < config.numCables; i++) {
+    sensorPins[i].currentPin = A0 + i * 2;
+    sensorPins[i].voltagePin = A1 + i * 2;
+    currentSensors[i] = new ACS712(ACS712_05B, sensorPins[i].currentPin);
+    currentSensors[i]->calibrate();
+    currentFilters[i] = new MovingAverageFilter(10);
+    voltageFilters[i] = new MovingAverageFilter(10);
+  }
+}
+
+bool readCableData(int cableId, JsonObject& cableObj) {
+  if (cableId >= config.numCables) return false;
+
+  cableObj["id"] = cableId;
+
+  // Leer corriente con filtro y manejo de errores
+  float rawCurrent;
+  if (currentSensors[cableId]->getCurrentAC(rawCurrent)) {
+    float current = currentFilters[cableId]->addSample(rawCurrent);
+    cableObj["current"] = current;
+  } else {
+    cableObj["currentError"] = "Failed to read current";
+  }
+
+  // Leer voltaje con filtro y manejo de errores
+  int rawVoltage = analogRead(sensorPins[cableId].voltagePin);
+  if (rawVoltage != -1) {
+    float voltage = (rawVoltage / 1024.0) * 5.0 * 11.0; // Asumiendo un divisor de voltaje 10k:1k
+    voltage = voltageFilters[cableId]->addSample(voltage);
+    cableObj["voltage"] = voltage;
+  } else {
+    cableObj["voltageError"] = "Failed to read voltage";
+  }
+
+  // Determinar si el cable está muerto
+  if (cableObj.containsKey("current") && cableObj.containsKey("voltage")) {
+    bool isDead = (abs(cableObj["current"].as<float>()) < config.currentThreshold) && 
+                  (cableObj["voltage"].as<float>() < config.voltageThreshold);
+    cableObj["isDead"] = isDead;
+  }
+
+  return true;
+}
+
+void processSerialCommand() {
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, Serial);
+
+  if (error) {
+    Serial.println("{\"error\": \"Invalid JSON command\"}");
+    return;
+  }
+
+  if (doc.containsKey("setConfig")) {
+    JsonObject newConfig = doc["setConfig"];
+    if (newConfig.containsKey("numCables")) {
+      config.numCables = newConfig["numCables"];
+    }
+    if (newConfig.containsKey("currentThreshold")) {
+      config.currentThreshold = newConfig["currentThreshold"];
+    }
+    if (newConfig.containsKey("voltageThreshold")) {
+      config.voltageThreshold = newConfig["voltageThreshold"];
+    }
+    EEPROM.put(EEPROM_CONFIG_ADDR, config);
+    initializeSensors();
+    Serial.println("{\"status\": \"Configuration updated\"}");
+  } else if (doc.containsKey("getConfig")) {
+    StaticJsonDocument<256> configDoc;
+    configDoc["numCables"] = config.numCables;
+    configDoc["currentThreshold"] = config.currentThreshold;
+    configDoc["voltageThreshold"] = config.voltageThreshold;
+    serializeJson(configDoc, Serial);
+    Serial.println();
+  } else if (doc.containsKey("calibrate")) {
+    int cableId = doc["calibrate"];
+    if (cableId >= 0 && cableId < config.numCables) {
+      currentSensors[cableId]->calibrate();
+      Serial.println("{\"status\": \"Sensor calibrated\"}");
+    } else {
+      Serial.println("{\"error\": \"Invalid cable ID\"}");
+    }
+  } else {
+    Serial.println("{\"error\": \"Unknown command\"}");
+  }
+}

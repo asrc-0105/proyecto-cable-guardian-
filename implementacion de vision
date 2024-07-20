@@ -1,0 +1,101 @@
+import cv2
+import numpy as np
+import tensorflow as tf
+import argparse
+import threading
+import datetime
+import os
+from pathlib import Path
+from win10toast import ToastNotifier  # Para notificaciones en Windows
+
+# Configuración de argumentos
+parser = argparse.ArgumentParser(description='Cable Guardian Configuration')
+parser.add_argument('--model', type=str, default='model.h5', help='Ruta al modelo preentrenado')
+parser.add_argument('--camera', type=int, default=0, help='Índice de la cámara')
+parser.add_argument('--threshold', type=float, default=0.5, help='Umbral de confianza')
+parser.add_argument('--output', type=str, default='output', help='Directorio para guardar imágenes')
+args = parser.parse_args()
+
+# Cargar el modelo preentrenado
+try:
+    model = tf.keras.models.load_model(args.model)
+except Exception as e:
+    print(f"Error al cargar el modelo: {e}")
+    exit()
+
+# Configuración de la cámara
+camera = cv2.VideoCapture(args.camera)
+if not camera.isOpened():
+    print("Error al abrir la cámara.")
+    exit()
+
+# Crear directorio de salida si no existe
+output_dir = Path(args.output)
+output_dir.mkdir(parents=True, exist_ok=True)
+
+# Inicializar el notificador
+toaster = ToastNotifier()
+
+def preprocess_image(image):
+    """Preprocesa la imagen para el modelo de detección."""
+    image = cv2.resize(image, (224, 224))  # Ajusta el tamaño según tu modelo
+    image = image.astype(np.float32) / 255.0  # Normaliza la imagen
+    image = np.expand_dims(image, axis=0)  # Agrega la dimensión de batch
+    return image
+
+def detect_dead_cables(frame, threshold=0.5):
+    """Detecta cables muertos en la imagen con umbral ajustable."""
+    preprocessed_frame = preprocess_image(frame)
+    predictions = model.predict(preprocessed_frame)
+    
+    # Supongamos que el modelo devuelve probabilidades para múltiples clases
+    class_index = np.argmax(predictions, axis=1)[0]
+    confidence = predictions[0][class_index]
+    
+    if confidence > threshold:
+        return f"Cable Muerto Detectado (Confianza: {confidence:.2f})", True
+    else:
+        return f"Cable en Buen Estado (Confianza: {confidence:.2f})", False
+
+def process_frame(frame):
+    """Procesa un frame en un hilo separado."""
+    result, is_dead = detect_dead_cables(frame, threshold=args.threshold)
+    return result, is_dead
+
+def display_frame(frame, result):
+    """Muestra el frame con el resultado."""
+    cv2.putText(frame, result, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
+    cv2.imshow('Cable Guardian', frame)
+
+def save_frame(frame, result):
+    """Guarda el frame con el resultado en el directorio de salida."""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = output_dir / f"{timestamp}_{result.replace(' ', '_').replace(':', '')}.jpg"
+    cv2.imwrite(str(filename), frame)
+
+def show_notification(message):
+    """Muestra una notificación en Windows."""
+    toaster.show_toast("Cable Guardian", message, duration=10)
+
+while True:
+    ret, frame = camera.read()
+    if not ret:
+        break
+    
+    # Procesar el frame en un hilo separado
+    result, is_dead = process_frame(frame)
+    
+    # Mostrar el resultado en la imagen
+    display_frame(frame, result)
+    
+    # Guardar el frame si se detecta un cable muerto
+    if is_dead:
+        save_frame(frame, result)
+        show_notification("Cable Muerto Detectado")
+
+    # Salir con 'q'
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+camera.release()
+cv2.destroyAllWindows()

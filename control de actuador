@@ -1,0 +1,40 @@
+#include <Servo.h>  // Incluir la biblioteca Servo
+
+// Definición de pines
+const int pinSensor = 2;  // Pin digital donde se conecta la señal del sensor de cables muertos
+const int pinServo = 9;   // Pin digital donde se conecta el servomotor
+
+// Variables
+bool cableMuertoDetectado = false;
+Servo servoMotor;  // Crear un objeto Servo
+
+// Configuraciones de ajuste
+const int posicionCorte = 90;  // Posición del servomotor para cortar el cable (ajustar según la herramienta de corte)
+const int posicionReposo = 0;  // Posición inicial del servomotor (ajustar según la configuración)
+const int tiempoCorte = 5000;  // Tiempo en milisegundos que el servomotor debe permanecer en la posición de corte (ajustar según necesidad)
+const int tiempoEspera = 1000; // Tiempo en milisegundos entre lecturas del sensor (ajustar según necesidad)
+
+void setup() {
+  // Inicialización de pines
+  pinMode(pinSensor, INPUT);        // El pin del sensor está en modo de entrada
+  
+  // Inicializa el servomotor
+  servoMotor.attach(pinServo);       // Conecta el servomotor al pin especificado
+  servoMotor.write(posicionReposo);  // Posición inicial del servomotor
+}
+
+void loop() {
+  // Leer el estado del sensor
+  cableMuertoDetectado = digitalRead(pinSensor);
+  
+  // Si se detecta un cable muerto
+  if (cableMuertoDetectado) {
+    // Mover el servomotor para cortar el cable
+    servoMotor.write(posicionCorte);  // Mover el servomotor a la posición de corte
+    delay(tiempoCorte);              // Mantener el servomotor en posición durante el tiempo especificado
+    servoMotor.write(posicionReposo); // Regresar a la posición inicial
+  }
+  
+  // Espera antes de volver a comprobar el sensor
+  delay(tiempoEspera);  // Espera antes de volver a leer el sensor
+}

@@ -1,0 +1,58 @@
+from flask import Flask, request, jsonify
+from flask_basicauth import BasicAuth
+import json
+import os
+
+app = Flask(__name__)
+
+# Configuración de autenticación básica
+app.config['BASIC_AUTH_USERNAME'] = 'admin'
+app.config['BASIC_AUTH_PASSWORD'] = 'secret'
+basic_auth = BasicAuth(app)
+
+# Ruta para almacenar datos de sensores
+data_store_file = 'data_store.json'
+
+def load_data_store():
+    if os.path.exists(data_store_file):
+        with open(data_store_file, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_data_store(data):
+    with open(data_store_file, 'w') as f:
+        json.dump(data, f, indent=4)
+
+@app.route('/api/datos', methods=['POST'])
+@basic_auth.required
+def receive_data():
+    data = request.json
+    data_store = load_data_store()
+    data_store['latest'] = data
+    save_data_store(data_store)
+    return jsonify({'status': 'success'}), 200
+
+@app.route('/api/datos', methods=['GET'])
+@basic_auth.required
+def get_data():
+    data_store = load_data_store()
+    return jsonify(data_store)
+
+@app.route('/api/control', methods=['POST'])
+@basic_auth.required
+def receive_control_command():
+    command = request.json.get('command')
+    if command:
+        print('Comando recibido:', command)
+        # Aquí puedes agregar lógica para procesar el comando
+        return jsonify({'status': 'success'}), 200
+    return jsonify({'status': 'error', 'message': 'No command provided'}), 400
+
+@app.route('/api/control', methods=['GET'])
+@basic_auth.required
+def get_control_command():
+    # Esta ruta puede usarse para obtener comandos o status de control
+    return jsonify({'status': 'success'}), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)

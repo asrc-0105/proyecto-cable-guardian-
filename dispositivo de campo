@@ -1,0 +1,65 @@
+import network
+import urequests
+import machine
+import time
+
+# Configuración de la red Wi-Fi
+SSID = 'tu_red_wifi'
+PASSWORD = 'tu_contraseña_wifi'
+SERVER_URL = 'https://direccion_del_servidor/api'
+
+# Configuración del sensor
+sensor_pin = 34
+sensor = machine.ADC(machine.Pin(sensor_pin))
+sensor.atten(machine.ADC.ATTN_11DB)
+
+def connect_to_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect(SSID, PASSWORD)
+    print('Conectando a Wi-Fi...')
+    start_time = time.time()
+    while not wlan.isconnected():
+        if time.time() - start_time > 30:
+            print('No se pudo conectar a Wi-Fi')
+            return False
+        time.sleep(1)
+    print('Conectado a Wi-Fi')
+    print('IP:', wlan.ifconfig()[0])
+    return True
+
+def send_data_to_server(data):
+    try:
+        response = urequests.post(SERVER_URL + '/datos', json=data)
+        print('Datos enviados:', response.text)
+        response.close()
+    except Exception as e:
+        print('Error al enviar datos:', e)
+
+def check_for_control_commands():
+    try:
+        response = urequests.get(SERVER_URL + '/control')
+        if response.status_code == 200:
+            command = response.json().get('command')
+            print('Comando recibido:', command)
+            # Implementa la lógica para ejecutar el comando aquí
+        response.close()
+    except Exception as e:
+        print('Error al recibir comandos:', e)
+
+def read_sensor_data():
+    raw_value = sensor.read()
+    temperature = (raw_value / 4095) * 100
+    return {'temperature': temperature}
+
+def main():
+    while True:
+        if connect_to_wifi():
+            sensor_data = read_sensor_data()
+            send_data_to_server(sensor_data)
+            check_for_control_commands()  # Revisa comandos de control
+            network.WLAN(network.STA_IF).active(False)  # Desactiva Wi-Fi para ahorrar energía
+        time.sleep(60)  # Espera 60 segundos antes de la siguiente lectura
+
+if __name__ == '__main__':
+    main()

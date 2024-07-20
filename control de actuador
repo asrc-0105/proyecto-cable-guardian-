@@ -9,10 +9,10 @@ bool cableMuertoDetectado = false;
 Servo servoMotor;  // Crear un objeto Servo
 
 // Configuraciones de ajuste
-const int posicionCorte = 90;  // Posición del servomotor para cortar el cable (ajustar según la herramienta de corte)
-const int posicionReposo = 0;  // Posición inicial del servomotor (ajustar según la configuración)
-const int tiempoCorte = 5000;  // Tiempo en milisegundos que el servomotor debe permanecer en la posición de corte (ajustar según necesidad)
-const int tiempoEspera = 1000; // Tiempo en milisegundos entre lecturas del sensor (ajustar según necesidad)
+const int posicionCorte = 90;  // Posición del servomotor para cortar el cable
+const int posicionReposo = 0;  // Posición inicial del servomotor
+const int tiempoCorte = 5000;  // Tiempo en milisegundos que el servomotor debe permanecer en la posición de corte
+const int tiempoEspera = 1000; // Tiempo en milisegundos entre lecturas del sensor
 
 void setup() {
   // Inicialización de pines
@@ -21,6 +21,8 @@ void setup() {
   // Inicializa el servomotor
   servoMotor.attach(pinServo);       // Conecta el servomotor al pin especificado
   servoMotor.write(posicionReposo);  // Posición inicial del servomotor
+  
+  // Inicialización adicional, si es necesario
 }
 
 void loop() {
@@ -29,12 +31,19 @@ void loop() {
   
   // Si se detecta un cable muerto
   if (cableMuertoDetectado) {
-    // Mover el servomotor para cortar el cable
+    // Activar el actuador para cortar el cable
     servoMotor.write(posicionCorte);  // Mover el servomotor a la posición de corte
-    delay(tiempoCorte);              // Mantener el servomotor en posición durante el tiempo especificado
-    servoMotor.write(posicionReposo); // Regresar a la posición inicial
+    
+    // Esperar hasta que el corte se complete
+    delay(tiempoCorte);
+    
+    // Regresar el servomotor a la posición inicial
+    servoMotor.write(posicionReposo);
+    
+    // Esperar antes de volver a comprobar el sensor para evitar múltiples detecciones del mismo cable
+    delay(tiempoEspera * 2);  // Doble del tiempo de espera para permitir estabilización
+  } else {
+    // Solo esperar si no hay detección
+    delay(tiempoEspera);
   }
-  
-  // Espera antes de volver a comprobar el sensor
-  delay(tiempoEspera);  // Espera antes de volver a leer el sensor
 }
